@@ -20,5 +20,5 @@ npm test
 npm run build
 ```
 
-Deployed on Vercel; pushes to `main` auto-deploy.
+Deployed at https://gym-tracker-porelo.vercel.app — pushes to `main` auto-deploy.
 
