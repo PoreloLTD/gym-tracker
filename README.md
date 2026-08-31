@@ -22,4 +22,3 @@ npm run build
 
 Deployed on Vercel; pushes to `main` auto-deploy.
 
-Live at https://overload-git-claude-gym-tracker-app-h5gljf-porelo.vercel.app
