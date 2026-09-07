@@ -5,7 +5,9 @@ import { format } from "date-fns";
 import { ChevronDown, Copy, Ruler, Scale, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ExerciseDeltaList } from "@/components/gym/session-recap";
 import { rateVerdict, weeklyRate, BULK_RATE_KG_PER_WEEK } from "@/lib/gym/body";
+import { compareSessions, comparableBefore, formatDelta } from "@/lib/gym/compare";
 import { GYM_DAYS, getDay } from "@/lib/gym/plan";
 import {
   formatKg,
@@ -179,8 +181,14 @@ function SessionRow({ session }: { session: WorkoutSession }) {
   const deleteSession = useGymStore((s) => s.deleteSession);
   const [open, setOpen] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
+  const sessions = useGymStore((s) => s.sessions);
   const day = getDay(session.dayId);
   const tonnage = sessionTonnage(session.sets, day.exercises);
+  const comparison = React.useMemo(
+    () => compareSessions(session, comparableBefore(sessions, session), day.exercises),
+    [session, sessions, day.exercises],
+  );
+  const hasBaseline = comparison.previous !== undefined && comparison.tonnage.previous > 0;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -205,6 +213,19 @@ function SessionRow({ session }: { session: WorkoutSession }) {
           <p className="text-xs text-zinc-500">
             {Object.values(session.sets).reduce((n, s) => n + s.length, 0)} sets
             {tonnage > 0 ? ` · ${formatKg(tonnage)}` : ""}
+            {hasBaseline && (
+              <span
+                className={`ml-2 font-mono ${
+                  comparison.tonnage.diff > 0
+                    ? "text-emerald-400"
+                    : comparison.tonnage.diff < 0
+                      ? "text-amber-400"
+                      : "text-zinc-400"
+                }`}
+              >
+                {formatDelta(comparison.tonnage, "weight")} vs last
+              </span>
+            )}
           </p>
         </div>
         <ChevronDown
@@ -213,31 +234,7 @@ function SessionRow({ session }: { session: WorkoutSession }) {
       </button>
       {open && (
         <div className="border-t border-zinc-800 p-3 pt-2">
-          <ul className="space-y-1 text-sm">
-            {day.exercises
-              .filter((ex) => (session.sets[ex.id] ?? []).length > 0)
-              .map((ex) => {
-                const sets = session.sets[ex.id] ?? [];
-                return (
-                  <li key={ex.id} className="flex justify-between gap-3">
-                    <span className="min-w-0 truncate text-zinc-300">
-                      {ex.name}
-                    </span>
-                    <span className="shrink-0 font-mono text-zinc-400">
-                      {ex.loadType === "time"
-                        ? sets.map((s) => formatSeconds(s.reps)).join(" ")
-                        : sets
-                            .map((s) =>
-                              ex.loadType === "weight"
-                                ? `${s.weight}×${s.reps}`
-                                : `${s.reps}${s.weight > 0 ? `+${s.weight}` : ""}`,
-                            )
-                            .join(" ")}
-                    </span>
-                  </li>
-                );
-              })}
-          </ul>
+          <ExerciseDeltaList comparison={comparison} />
           {confirming ? (
             <div className="mt-2 flex gap-2">
               <button

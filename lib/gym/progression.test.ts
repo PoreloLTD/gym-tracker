@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { blockPosition } from "@/lib/gym/block";
 import { rateVerdict, weeklyRate } from "@/lib/gym/body";
 import {
+  compareSessions,
+  comparableBefore,
+  formatDelta,
+  formatScore,
+} from "@/lib/gym/compare";
+import {
   GYM_DAYS,
   HANDSTAND_STAGE_DRILLS,
   MUSCLE_UP_PHASE_DRILLS,
@@ -344,5 +350,58 @@ describe("next-session pre-fill (suggestNextSets)", () => {
     )!;
     expect(next).toHaveLength(2);
     expect(next[0]).toEqual({ weight: 47.5, reps: 6 });
+  });
+});
+
+describe("session comparison", () => {
+  const day = getDay("upper-a");
+  const mk = (id: string, startedAt: number, sets: Record<string, LoggedSet[]>, extra = {}) => ({
+    id, dayId: "upper-a" as const, startedAt, finishedAt: startedAt + 3600e3, sets, ...extra,
+  });
+  const lastWeek = mk("a", 1000, {
+    "smith-incline-press": [set(60, 8), set(60, 8), set(60, 8), set(60, 8)], // 1920
+    "face-pull": [set(7.25, 18), set(7.25, 17), set(7.25, 16)], // 369.75
+    "hollow-hold": [set(0, 30), set(0, 30), set(0, 30)],
+  });
+  const today = mk("b", 2000, {
+    "smith-incline-press": [set(62.5, 6), set(62.5, 6), set(62.5, 6), set(62.5, 6)], // 1500
+    "face-pull": [set(7.25, 19), set(7.25, 18), set(7.25, 17)], // 391.5
+    "hollow-hold": [set(0, 35), set(0, 30), set(0, 30)],
+    "lat-pulldown": [set(40, 10)], // new this time
+  });
+
+  it("finds the previous comparable session of the same day, skipping deloads", () => {
+    const deload = mk("d", 1500, {}, { isDeload: true });
+    expect(comparableBefore([lastWeek, deload, today], today)?.id).toBe("a");
+    expect(comparableBefore([today], today)).toBeUndefined();
+  });
+
+  it("compares tonnage, per-exercise scores and flags PRs", () => {
+    const c = compareSessions(today, lastWeek, day.exercises);
+    expect(c.tonnage.current).toBeCloseTo(1500 + 391.5 + 400);
+    expect(c.tonnage.previous).toBeCloseTo(1920 + 369.75);
+    // Rows follow the plan's exercise order, not logging order.
+    expect(c.exercises.map((r) => r.exercise.id)).toEqual([
+      "smith-incline-press", "lat-pulldown", "face-pull", "hollow-hold",
+    ]);
+    const press = c.exercises.find((r) => r.exercise.id === "smith-incline-press")!;
+    expect(press.isPR).toBe(true); // heavier best set, even though tonnage fell
+    expect(press.score.diff).toBeCloseTo(-420);
+    const hold = c.exercises.find((r) => r.exercise.id === "hollow-hold")!;
+    expect(hold.isPR).toBe(true); // 35 s > 30 s
+    expect(hold.score.diff).toBe(5);
+    const pulldown = c.exercises.find((r) => r.exercise.id === "lat-pulldown")!;
+    expect(pulldown.isPR).toBe(false); // no baseline
+    expect(c.prCount).toBe(3); // press, face pull (19 > 18 at same load), hold
+    expect(c.improved).toBe(2); // face pull + hold went up; press tonnage fell
+  });
+
+  it("formats scores and deltas per load type", () => {
+    expect(formatScore(1500, "weight")).toBe("1,500 kg");
+    expect(formatScore(95, "time")).toBe("1:35");
+    expect(formatScore(24, "bodyweight")).toBe("24 reps");
+    expect(formatDelta(delta(2200, 2000), "weight")).toBe("+200 kg (+10%)");
+    expect(formatDelta(delta(1800, 2000), "weight")).toBe("−200 kg (−10%)");
+    expect(formatDelta(delta(100, 0), "weight")).toBe("");
   });
 });

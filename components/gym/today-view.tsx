@@ -4,6 +4,7 @@ import * as React from "react";
 import { format } from "date-fns";
 import { CalendarRange, ChevronRight, Home, Play } from "lucide-react";
 
+import { SessionRecap } from "@/components/gym/session-recap";
 import { SessionView } from "@/components/gym/session-view";
 import { blockPosition } from "@/lib/gym/block";
 import { GYM_DAYS, dayForWeekday } from "@/lib/gym/plan";
@@ -22,6 +23,9 @@ export function TodayView({ goToPlan }: { goToPlan: () => void }) {
 
   const now = new Date();
   const todayDay = dayForWeekday(now.getDay());
+  const lastFinished = sessions
+    .filter((s) => s.finishedAt)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
   const block = blockStartISO ? blockPosition(blockStartISO, now) : null;
 
   // Mon-first index of today, to mark this week's done days.
@@ -36,6 +40,8 @@ export function TodayView({ goToPlan }: { goToPlan: () => void }) {
 
   return (
     <div className="space-y-4">
+      {lastFinished && <SessionRecap session={lastFinished} sessions={sessions} />}
+
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 font-bold text-zinc-50">
