@@ -34,10 +34,10 @@ export function ExerciseDeltaList({ comparison }: { comparison: SessionCompariso
           : null;
         return (
           <li key={row.exercise.id} className="flex items-baseline justify-between gap-3">
-            <span className="min-w-0 truncate text-zinc-300">
-              {row.exercise.name}
+            <span className="flex min-w-0 items-center gap-1.5 text-zinc-300">
+              <span className="min-w-0 truncate">{row.exercise.name}</span>
               {row.isPR && (
-                <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-300">
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-300">
                   <Trophy className="size-3" /> PR
                 </span>
               )}
