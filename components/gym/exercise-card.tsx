@@ -10,6 +10,7 @@ import {
   formatKg,
   formatSeconds,
   progressionHint,
+  suggestNextSets,
   totalTonnage,
   totalReps,
   workScore,
@@ -35,6 +36,10 @@ const hintStyle: Record<string, string> = {
   hold: "border-amber-500/40 bg-amber-500/10 text-amber-300",
 };
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function Stepper({
   label,
   value,
@@ -48,6 +53,26 @@ function Stepper({
   min?: number;
   onChange: (v: number) => void;
 }) {
+  // While the field is being typed into, show the raw text so partial
+  // decimals ("7.", "14.5") aren't reformatted mid-keystroke; commit the
+  // parsed number whenever the text is a valid amount.
+  const [draft, setDraft] = React.useState<string | null>(null);
+  const shown = draft ?? String(value);
+
+  const commit = (raw: string) => {
+    setDraft(raw);
+    const normalised = raw.trim().replace(",", ".");
+    if (normalised === "") return;
+    if (!/^\d*\.?\d*$/.test(normalised)) return;
+    const parsed = Number(normalised);
+    if (Number.isFinite(parsed)) onChange(Math.max(min, round2(parsed)));
+  };
+
+  const nudge = (delta: number) => {
+    setDraft(null);
+    onChange(Math.max(min, round2(value + delta)));
+  };
+
   return (
     <div className="flex-1">
       <p className="mb-1 text-center text-[0.65rem] font-medium uppercase tracking-wider text-zinc-500">
@@ -56,7 +81,7 @@ function Stepper({
       <div className="flex items-center overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950">
         <button
           type="button"
-          onClick={() => onChange(Math.max(min, Math.round((value - step) * 10) / 10))}
+          onClick={() => nudge(-step)}
           className="flex h-11 w-10 shrink-0 items-center justify-center text-zinc-400 hover:bg-zinc-800 active:bg-zinc-700"
           aria-label={`Decrease ${label}`}
         >
@@ -65,18 +90,16 @@ function Stepper({
         <input
           type="text"
           inputMode="decimal"
-          value={String(value)}
-          onChange={(e) => {
-            const parsed = Number(e.target.value.replace(",", "."));
-            if (Number.isFinite(parsed)) onChange(Math.max(min, parsed));
-            else if (e.target.value === "") onChange(min);
-          }}
+          value={shown}
+          onChange={(e) => commit(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onBlur={() => setDraft(null)}
           className="h-11 w-full min-w-0 bg-transparent text-center font-mono text-lg font-semibold text-zinc-50 outline-none"
           aria-label={label}
         />
         <button
           type="button"
-          onClick={() => onChange(Math.round((value + step) * 10) / 10)}
+          onClick={() => nudge(step)}
           className="flex h-11 w-10 shrink-0 items-center justify-center text-zinc-400 hover:bg-zinc-800 active:bg-zinc-700"
           aria-label={`Increase ${label}`}
         >
@@ -99,12 +122,29 @@ export function ExerciseCard({
   const isTime = exercise.loadType === "time";
   const showWeight = exercise.loadType === "weight" || exercise.increment > 0;
 
-  // Inputs default to the matching set from last session (or the last set
-  // logged today) until the user edits them, so re-logging a load takes one tap.
-  const lastSame = lastSets[Math.min(loggedSets.length, lastSets.length - 1)];
+  // Deloads (wk 6/12): half the sets at 80% load, but skill work runs as
+  // normal — so hints pause and an 80% target replaces them, except on skills.
+  const deloadApplies = deload && exercise.section !== "skill";
+
+  // Inputs pre-fill with today's target for this set: last session's numbers
+  // with the plan's progression already applied (heavier after topping the
+  // range, a rep more inside it). If the lifter logs a different load than
+  // suggested, the next set follows their load, not the suggestion.
+  const suggested = React.useMemo(
+    () => suggestNextSets(exercise, lastSets, { deload: deloadApplies }),
+    [exercise, lastSets, deloadApplies],
+  );
+  const setIndex = loggedSets.length;
+  const target = suggested?.[Math.min(setIndex, suggested.length - 1)];
   const prevLogged = loggedSets[loggedSets.length - 1];
-  const defaultWeight = prevLogged?.weight ?? lastSame?.weight ?? 0;
-  const defaultReps = prevLogged?.reps ?? lastSame?.reps ?? exercise.repMin;
+  const deviated =
+    prevLogged !== undefined &&
+    suggested !== null &&
+    prevLogged.weight !== suggested[Math.min(setIndex - 1, suggested.length - 1)]?.weight;
+  const defaultWeight = deviated
+    ? prevLogged.weight
+    : (target?.weight ?? prevLogged?.weight ?? 0);
+  const defaultReps = target?.reps ?? prevLogged?.reps ?? exercise.repMin;
 
   const [weightOverride, setWeightOverride] = React.useState<number | null>(null);
   const [repsOverride, setRepsOverride] = React.useState<number | null>(null);
@@ -115,9 +155,6 @@ export function ExerciseCard({
   const setWeight = setWeightOverride;
   const setReps = setRepsOverride;
 
-  // Deloads (wk 6/12): half the sets at 80% load, but skill work runs as
-  // normal — so hints pause and an 80% target replaces them, except on skills.
-  const deloadApplies = deload && exercise.section !== "skill";
   const hint = deloadApplies ? null : progressionHint(exercise, lastSets);
   const lastBest = bestSet(lastSets);
   const deloadSets = Math.max(1, Math.ceil(exercise.sets / 2));
@@ -150,6 +187,16 @@ export function ExerciseCard({
     }
     return lastSets.map((s) => formatSeconds(s.reps)).join(" · ");
   }, [lastSets, exercise.loadType]);
+
+  const todaySummary = React.useMemo(() => {
+    if (!suggested || suggested.length === 0) return null;
+    const reps = suggested.map((t) => (isTime ? formatSeconds(t.reps) : t.reps)).join("·");
+    const load = suggested[0].weight;
+    if (exercise.loadType === "weight") return `${formatKg(load)} × ${reps}`;
+    if (exercise.loadType === "bodyweight")
+      return `${reps} reps${load > 0 ? ` +${load} kg` : ""}`;
+    return `${reps}${load > 0 ? ` @${load} kg` : ""}`;
+  }, [suggested, isTime, exercise.loadType]);
 
   const todayScore = workScore(loggedSets, exercise.loadType);
   const lastScore = workScore(lastSets, exercise.loadType);
@@ -226,6 +273,11 @@ export function ExerciseCard({
           {lastSummary && (
             <p className="text-sm text-zinc-400">
               <span className="text-zinc-500">Last time:</span> {lastSummary}
+            </p>
+          )}
+          {todaySummary && (
+            <p className="text-sm text-zinc-300">
+              <span className="text-zinc-500">Today:</span> {todaySummary}
             </p>
           )}
           {deloadText && (

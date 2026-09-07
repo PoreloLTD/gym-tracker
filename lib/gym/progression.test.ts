@@ -19,6 +19,7 @@ import {
   formatSeconds,
   progressionHint,
   sessionTonnage,
+  suggestNextSets,
   totalTonnage,
   totalReps,
   workScore,
@@ -274,5 +275,74 @@ describe("bodyweight trend", () => {
     expect(rateVerdict(0.1)).toBe("too-slow");
     expect(rateVerdict(0.4)).toBe("on-target");
     expect(rateVerdict(0.8)).toBe("too-fast");
+  });
+});
+
+describe("next-session pre-fill (suggestNextSets)", () => {
+  const inclinePress = getExercise("upper-a", "smith-incline-press")!; // 4 × 6–8, +2.5
+
+  it("returns null without history", () => {
+    expect(suggestNextSets(inclinePress, [])).toBeNull();
+  });
+
+  it("adds the step and resets to the bottom of the range after topping out", () => {
+    const next = suggestNextSets(
+      inclinePress,
+      [set(60, 8), set(60, 8), set(60, 8), set(60, 8)],
+    )!;
+    expect(next).toHaveLength(4);
+    expect(next.every((s) => s.weight === 62.5 && s.reps === 6)).toBe(true);
+  });
+
+  it("keeps the load and asks for one more rep per set inside the range", () => {
+    const next = suggestNextSets(
+      inclinePress,
+      [set(60, 8), set(60, 7), set(60, 6), set(60, 6)],
+    )!;
+    expect(next.map((s) => s.reps)).toEqual([8, 8, 7, 7]);
+    expect(next.every((s) => s.weight === 60)).toBe(true);
+  });
+
+  it("holds the load and targets the bottom of the range after a miss", () => {
+    const next = suggestNextSets(
+      inclinePress,
+      [set(60, 6), set(60, 5), set(60, 4), set(60, 4)],
+    )!;
+    expect(next.map((s) => s.reps)).toEqual([6, 6, 6, 6]);
+    expect(next[0].weight).toBe(60);
+  });
+
+  it("extends the pattern when last time had fewer sets than planned", () => {
+    const next = suggestNextSets(inclinePress, [set(60, 7), set(60, 7)])!;
+    expect(next).toHaveLength(4);
+    expect(next.map((s) => s.reps)).toEqual([8, 8, 8, 8]);
+  });
+
+  it("keeps fractional cable loads exact", () => {
+    const facePull = getExercise("upper-a", "face-pull")!; // 3 × 15–20, +2.5
+    const next = suggestNextSets(facePull, [set(7.25, 20), set(7.25, 20), set(7.25, 20)])!;
+    expect(next[0].weight).toBe(9.75);
+    expect(next[0].reps).toBe(15);
+  });
+
+  it("progresses timed and unloaded bodyweight work by seconds / a rep", () => {
+    const hollow = getExercise("upper-a", "hollow-hold")!; // 3 × 20–30 s
+    expect(
+      suggestNextSets(hollow, [set(0, 30), set(0, 30), set(0, 30)])![0].reps,
+    ).toBe(35);
+    const abWheel = getExercise("upper-a", "ab-wheel-a")!; // 3 × 8–12, bodyweight, no added load
+    expect(
+      suggestNextSets(abWheel, [set(0, 12), set(0, 12), set(0, 12)])![0].reps,
+    ).toBe(13);
+  });
+
+  it("pre-fills 80% load for half the sets on a deload", () => {
+    const next = suggestNextSets(
+      inclinePress,
+      [set(60, 8), set(60, 8), set(60, 8), set(60, 8)],
+      { deload: true },
+    )!;
+    expect(next).toHaveLength(2);
+    expect(next[0]).toEqual({ weight: 47.5, reps: 6 });
   });
 });

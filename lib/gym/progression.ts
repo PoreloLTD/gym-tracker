@@ -153,3 +153,75 @@ export function formatSeconds(total: number): string {
   const s = Math.round(total % 60);
   return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
 }
+
+export interface SuggestedSet {
+  weight: number;
+  reps: number;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * What to pre-fill for each set today, given the last comparable session:
+ * the plan's double progression applied, not just a copy of last time.
+ *
+ * - Topped the range on every set → load goes up by the exercise's step and
+ *   reps reset to the bottom of the range (timed work: +5 s instead).
+ * - Inside the range → same load, one more rep than last time on each set,
+ *   capped at the top of the range.
+ * - Below the range → same load, aim for the bottom of the range.
+ * - Deload → 80% of the heaviest load for half the sets, bottom of the range.
+ *
+ * Returns null when there is no history to base a suggestion on.
+ */
+export function suggestNextSets(
+  exercise: PlanExercise,
+  lastSets: LoggedSet[],
+  options: { deload?: boolean } = {},
+): SuggestedSet[] | null {
+  if (lastSets.length === 0) return null;
+
+  const heaviest = Math.max(...lastSets.map((s) => s.weight));
+  const setAt = (i: number) =>
+    lastSets[Math.min(i, lastSets.length - 1)];
+
+  if (options.deload && exercise.section !== "skill") {
+    const count = Math.max(1, Math.ceil(exercise.sets / 2));
+    const weight =
+      exercise.loadType === "weight" && heaviest > 0
+        ? deloadLoad(heaviest, exercise.increment)
+        : round2(heaviest * 0.8);
+    return Array.from({ length: count }, () => ({
+      weight,
+      reps: exercise.repMin,
+    }));
+  }
+
+  const hint = progressionHint(exercise, lastSets);
+  return Array.from({ length: exercise.sets }, (_, i) => {
+    const last = setAt(i);
+    if (hint?.action === "increase") {
+      if (exercise.loadType === "time") {
+        return { weight: last.weight, reps: last.reps + 5 };
+      }
+      if (exercise.increment > 0) {
+        return {
+          weight: round2(heaviest + exercise.increment),
+          reps: exercise.repMin,
+        };
+      }
+      // Unloaded bodyweight work: progress by a rep.
+      return { weight: last.weight, reps: last.reps + 1 };
+    }
+    if (hint?.action === "add-reps") {
+      return {
+        weight: last.weight,
+        reps: Math.min(exercise.repMax, last.reps + 1),
+      };
+    }
+    // hold: same load, aim for the bottom of the range
+    return { weight: last.weight, reps: Math.max(exercise.repMin, last.reps) };
+  });
+}
